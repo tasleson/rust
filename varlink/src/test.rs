@@ -4,7 +4,7 @@ use *;
 fn test_listen() {
     use std::{thread, time};
 
-    fn run_app(address: String, timeout: u64) -> Result<()> {
+    fn run_app<S: ?Sized + AsRef<str>>(address: &S, timeout: u64) -> Result<()> {
         let service = VarlinkService::new(
             "org.varlink",
             "test service",
@@ -13,13 +13,15 @@ fn test_listen() {
             vec![/* Your varlink interfaces go here */],
         );
 
-        if let Err(e) = listen(service, address, 10, timeout) {
-            panic!("Error listen: {}", e);
+        if let Err(e) = listen(service, &address, 10, timeout) {
+            if e.kind() != ErrorKind::Timeout {
+                panic!("Error listen: {:#?}", e);
+            }
         }
         Ok(())
     }
 
-    fn run_client_app(address: String) -> Result<()> {
+    fn run_client_app<S: ?Sized + AsRef<str>>(address: &S) -> Result<()> {
         let conn = Connection::new(address)?;
         let mut call = OrgVarlinkServiceClient::new(conn.clone());
         {
@@ -113,8 +115,7 @@ error InvalidParameter (parameter: string)
         Ok(())
     }
 
-    let address = String::from("unix:/tmp/test_listen_timeout");
-    let client_address = address.clone();
+    let address = "unix:/tmp/test_listen_timeout";
 
     let child = thread::spawn(move || {
         if let Err(e) = run_app(address, 3) {
@@ -125,7 +126,7 @@ error InvalidParameter (parameter: string)
     // give server time to start
     thread::sleep(time::Duration::from_secs(1));
 
-    assert!(run_client_app(client_address).is_ok());
+    assert!(run_client_app(address).is_ok());
 
     assert!(child.join().is_ok());
 }

@@ -64,8 +64,8 @@ fn main() {
     };
 
     let ret = match client_mode {
-        true => run_client(address),
-        false => run_server(address, 0),
+        true => run_client(&address),
+        false => run_server(&address, 0),
     };
 
     exit(match ret {
@@ -79,7 +79,7 @@ fn main() {
 
 // Client
 
-fn run_client(address: String) -> varlink::Result<()> {
+fn run_client<S: ?Sized + AsRef<str>>(address: &S) -> varlink::Result<()> {
     let conn = varlink::Connection::new(address)?;
 
     let mut iface = varlink::OrgVarlinkServiceClient::new(conn.clone());
@@ -206,7 +206,7 @@ impl io_systemd_network_new::VarlinkInterface for MyIoSystemdNetwork {
     }
 }
 
-fn run_server(address: String, timeout: u64) -> varlink::Result<()> {
+fn run_server<S: ?Sized + AsRef<str>>(address: &S, timeout: u64) -> varlink::Result<()> {
     let state = Arc::new(RwLock::new(0));
     let myiosystemdnetwork = MyIoSystemdNetwork { state };
     let myinterface = io_systemd_network_new::new(Box::new(myiosystemdnetwork));

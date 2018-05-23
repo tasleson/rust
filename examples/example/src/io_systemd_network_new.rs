@@ -84,13 +84,13 @@ pub struct Error {
 #[derive(Clone, PartialEq, Debug, Fail)]
 pub enum ErrorKind {
     #[fail(display = "IO error")]
-    Io_,
+    Io_(::std::io::ErrorKind),
     #[fail(display = "(De)Serialization Error")]
-    SerdeJson_,
+    SerdeJson_(serde_json::error::Category),
     #[fail(display = "Varlink Error")]
     Varlink(varlink::ErrorKind),
-    #[fail(display = "Unknown error: '{:#?}'", _0)]
-    Unknown_(varlink::Reply),
+    #[fail(display = "Unknown error reply: '{:#?}'", _0)]
+    VarlinkReply(varlink::Reply),
     #[fail(display = "io.systemd.network.UnknownError: {:#?}", _0)]
     UnknownError(Option<UnknownErrorArgs_>),
     #[fail(display = "io.systemd.network.UnknownNetworkIfIndex: {:#?}", _0)]
@@ -135,13 +135,15 @@ impl From<Context<ErrorKind>> for Error {
 
 impl From<::std::io::Error> for Error {
     fn from(e: ::std::io::Error) -> Error {
-        e.context(ErrorKind::Io_).into()
+        let kind = e.kind();
+        e.context(ErrorKind::Io_(kind)).into()
     }
 }
 
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Error {
-        e.context(ErrorKind::SerdeJson_).into()
+        let cat = e.classify();
+        e.context(ErrorKind::SerdeJson_(cat)).into()
     }
 }
 
@@ -151,8 +153,8 @@ impl From<varlink::Error> for Error {
     fn from(e: varlink::Error) -> Self {
         let kind = e.kind();
         match kind {
-            varlink::ErrorKind::Io => e.context(ErrorKind::Io_).into(),
-            varlink::ErrorKind::SerdeJson => e.context(ErrorKind::SerdeJson_).into(),
+            varlink::ErrorKind::Io(kind) => e.context(ErrorKind::Io_(kind)).into(),
+            varlink::ErrorKind::SerdeJsonSer(cat) => e.context(ErrorKind::SerdeJson_(cat)).into(),
             kind => e.context(ErrorKind::Varlink(kind)).into(),
         }
     }
@@ -195,7 +197,7 @@ impl From<varlink::Reply> for Error {
                     _ => ErrorKind::UnknownNetworkIfIndex(None).into(),
                 }
             }
-            _ => return ErrorKind::Unknown_(e).into(),
+            _ => return ErrorKind::VarlinkReply(e).into(),
         }
     }
 }
