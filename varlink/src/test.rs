@@ -36,11 +36,11 @@ fn test_listen() {
         let e = call.get_interface_description("org.varlink.unknown");
         assert!(e.is_err());
 
-        match e {
-            Err(Error(ErrorKind::InvalidParameter(i), _)) => assert_eq!(i, "interface"
+        match e.err().unwrap().kind() {
+            ErrorKind::InvalidParameter(i) => assert_eq!(i, "interface"
                 .to_string()),
-            _ => {
-                panic!("Unknown error {:?}", e);
+            kind => {
+                panic!("Unknown error {:?}", kind);
             }
         }
 
@@ -50,12 +50,12 @@ fn test_listen() {
             GetInfoArgs {},
         ).call();
 
-        match e {
-            Err(Error(ErrorKind::MethodNotFound(i), _)) => {
+        match e.err().unwrap().kind() {
+            ErrorKind::MethodNotFound(i) => {
                 assert_eq!(i, "org.varlink.service.GetInfos".to_string())
             }
-            _ => {
-                panic!("Unknown error {:?}", e);
+            kind => {
+                panic!("Unknown error {:?}", kind);
             }
         }
 
@@ -65,12 +65,12 @@ fn test_listen() {
             GetInfoArgs {},
         ).call();
 
-        match e {
-            Err(Error(ErrorKind::InterfaceNotFound(i), _)) => {
+        match e.err().unwrap().kind() {
+            ErrorKind::InterfaceNotFound(i) => {
                 assert_eq!(i, "org.varlink.unknowninterface".to_string())
             }
-            _ => {
-                panic!("Unknown error {:?}", e);
+            kind => {
+                panic!("Unknown error {:?}", kind);
             }
         }
 

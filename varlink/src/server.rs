@@ -19,6 +19,17 @@ use std::time::Duration;
 // FIXME: https://github.com/rust-lang/rust/issues/14194
 use unix_socket::UnixListener as AbstractUnixListener;
 
+pub enum ServerError {
+    IoError(Error),
+    AcceptTimeout,
+}
+
+impl From<Error> for ServerError {
+    fn from(e: Error) -> Self {
+        ServerError::IoError(e)
+    }
+}
+
 enum VarlinkListener {
     TCP(TcpListener),
     UNIX(UnixListener),
@@ -240,17 +251,6 @@ impl Worker {
         Worker {
             thread: Some(thread),
         }
-    }
-}
-
-pub enum ServerError {
-    IoError(Error),
-    AcceptTimeout,
-}
-
-impl From<Error> for ServerError {
-    fn from(e: Error) -> Self {
-        ServerError::IoError(e)
     }
 }
 

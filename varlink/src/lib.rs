@@ -172,6 +172,9 @@
 //!  (on Linux only)
 
 extern crate bytes;
+extern crate failure;
+#[macro_use]
+extern crate failure_derive;
 extern crate itertools;
 extern crate libc;
 extern crate serde;
@@ -183,9 +186,7 @@ extern crate tempfile;
 extern crate unix_socket;
 extern crate varlink_parser;
 
-#[macro_use]
-extern crate error_chain;
-
+use failure::{Backtrace, Context, Fail, ResultExt};
 use serde::de;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
@@ -194,7 +195,7 @@ use serde_json::Value;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::convert::From;
-use std::fmt;
+use std::fmt::{self, Display};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
@@ -206,43 +207,86 @@ mod server;
 #[cfg(test)]
 mod test;
 
-error_chain! {
-    foreign_links {
-        Io(::std::io::Error);
-        Fmt(::std::fmt::Error);
-        SerdeJson(::serde_json::Error);
+#[derive(Debug)]
+pub struct Error {
+    inner: Context<ErrorKind>,
+}
+
+#[derive(Clone, PartialEq, Debug, Fail)]
+pub enum ErrorKind {
+    #[fail(display = "IO error")]
+    Io,
+    #[fail(display = "(De)Serialization Error")]
+    SerdeJson,
+    #[fail(display = "Interface not found: '{}'", _0)]
+    InterfaceNotFound(String),
+    #[fail(display = "Invalid parameter: '{}'", _0)]
+    InvalidParameter(String),
+    #[fail(display = "Method not found: '{}'", _0)]
+    MethodNotFound(String),
+    #[fail(display = "Method not implemented: '{}'", _0)]
+    MethodNotImplemented(String),
+    #[fail(display = "Unknown error: '{:?}'", _0)]
+    UnknownError(Reply),
+    #[fail(display = "Call::reply() called with continues, but without more in the request")]
+    CallContinuesMismatch,
+    #[fail(display = "Varlink: method called already")]
+    MethodCalledAlready,
+    #[fail(display = "Varlink: connection busy with other method")]
+    ConnectionBusy,
+    #[fail(display = "Varlink: Iterator called on old reply")]
+    IteratorOldReply,
+}
+
+impl Fail for Error {
+    fn cause(&self) -> Option<&Fail> {
+        self.inner.cause()
     }
 
-    errors {
-        InterfaceNotFound(t: String) {
-            display("Interface not found: '{}'", t)
-        }
-        InvalidParameter(t: String) {
-            display("Invalid parameter: '{}'", t)
-        }
-        MethodNotFound(t: String) {
-            display("Method not found: '{}'", t)
-        }
-        MethodNotImplemented(t: String) {
-            display("Method not implemented: '{}'", t)
-        }
-        UnknownError(r: Reply) {
-            display("Unknown error: '{:?}'", r)
-        }
-        CallContinuesMismatch {
-            display("Call::reply() called with continues, but without more in the request")
-        }
-        MethodCalledAlready {
-            display("Varlink: method called already")
-        }
-        ConnectionBusy {
-            display("Varlink: connection busy with other method")
-        }
-        IteratorOldReply {
-            display("Varlink: Iterator called on old reply")
+    fn backtrace(&self) -> Option<&Backtrace> {
+        self.inner.backtrace()
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        Display::fmt(&self.inner, f)
+    }
+}
+
+impl Error {
+    pub fn kind(&self) -> ErrorKind {
+        self.inner.get_context().clone()
+    }
+}
+
+impl From<ErrorKind> for Error {
+    fn from(kind: ErrorKind) -> Error {
+        Error {
+            inner: Context::new(kind),
         }
     }
 }
+
+impl From<Context<ErrorKind>> for Error {
+    fn from(inner: Context<ErrorKind>) -> Error {
+        Error { inner }
+    }
+}
+
+impl From<::std::io::Error> for Error {
+    fn from(e: ::std::io::Error) -> Error {
+        e.context(ErrorKind::Io).into()
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Error {
+        e.context(ErrorKind::SerdeJson).into()
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default)]
 pub struct ErrorInterfaceNotFound {
@@ -669,7 +713,7 @@ pub trait CallTrait {
             "org.varlink.service.MethodNotFound",
             Some(serde_json::to_value(ErrorMethodNotFound {
                 method: Some(method_name),
-            })?),
+            }).context(ErrorKind::SerdeJson)?),
         ))
     }
 
@@ -679,7 +723,7 @@ pub trait CallTrait {
             "org.varlink.service.MethodNotImplemented",
             Some(serde_json::to_value(ErrorMethodNotImplemented {
                 method: Some(method_name),
-            })?),
+            }).context(ErrorKind::SerdeJson)?),
         ))
     }
 
@@ -689,7 +733,7 @@ pub trait CallTrait {
             "org.varlink.service.InvalidParameter",
             Some(serde_json::to_value(ErrorInvalidParameter {
                 parameter: Some(parameter_name),
-            })?),
+            }).context(ErrorKind::SerdeJson)?),
         ))
     }
 }
@@ -703,10 +747,10 @@ impl<'a> CallTrait for Call<'a> {
             reply.continues = Some(true);
         }
         //serde_json::to_writer(&mut *self.writer, &reply)?;
-        let b = serde_json::to_string(&reply)? + "\0";
+        let b = serde_json::to_string(&reply).context(ErrorKind::SerdeJson)? + "\0";
 
-        self.writer.write_all(b.as_bytes())?;
-        self.writer.flush()?;
+        self.writer.write_all(b.as_bytes()).context(ErrorKind::Io)?;
+        self.writer.flush().context(ErrorKind::Io)?;
         Ok(())
     }
     fn set_continues(&mut self, cont: bool) {
@@ -761,7 +805,7 @@ impl<'a> Call<'a> {
             match arg {
                 Some(a) => Some(serde_json::to_value(ErrorInterfaceNotFound {
                     interface: Some(a),
-                })?),
+                }).context(ErrorKind::SerdeJson)?),
                 None => None,
             },
         ))
@@ -770,10 +814,10 @@ impl<'a> Call<'a> {
     fn reply_parameters(&mut self, parameters: Value) -> Result<()> {
         let reply = Reply::parameters(Some(parameters));
         //serde_json::to_writer(&mut *self.writer, &reply)?;
-        let b = serde_json::to_string(&reply)? + "\0";
+        let b = serde_json::to_string(&reply).context(ErrorKind::SerdeJson)? + "\0";
 
-        self.writer.write_all(b.as_bytes())?;
-        self.writer.flush()?;
+        self.writer.write_all(b.as_bytes()).context(ErrorKind::Io)?;
+        self.writer.flush().context(ErrorKind::Io)?;
         Ok(())
     }
 }

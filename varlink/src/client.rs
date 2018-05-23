@@ -14,9 +14,9 @@ use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::process::Child;
 use std::process::Command;
+use tempfile::TempDir;
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 use tempfile::tempdir;
-use tempfile::TempDir;
 // FIXME: abstract unix domains sockets still not in std
 // FIXME: https://github.com/rust-lang/rust/issues/14194
 use unix_socket::UnixStream as AbstractStream;
@@ -60,8 +60,8 @@ pub fn varlink_exec<S: Into<String>>(address: S) -> io::Result<(Child, String, O
 pub fn varlink_exec<S: Into<String>>(address: S) -> io::Result<(Child, String, Option<TempDir>)> {
     let address: String = address.into();
 
-    use unix_socket::os::linux::SocketAddrExt;
     use unix_socket::UnixListener as AbstractUnixListener;
+    use unix_socket::os::linux::SocketAddrExt;
 
     let executable = &address[5..];
     let listener = AbstractUnixListener::bind("")?;

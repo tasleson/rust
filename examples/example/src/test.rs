@@ -1,12 +1,12 @@
-use std::io;
 use std::{thread, time};
+use failure::{self, Fail, Error};
 
-fn run_self_test(address: String) -> io::Result<()> {
+fn run_self_test(address: String) -> Result<(), Error> {
     let client_address = address.clone();
 
     let child = thread::spawn(move || {
         if let Err(e) = ::run_server(address, 4) {
-            panic!("error: {}", e);
+            panic!("error: {:#?}", e.cause());
         }
     });
 
@@ -15,13 +15,12 @@ fn run_self_test(address: String) -> io::Result<()> {
 
     let ret = ::run_client(client_address);
     if let Err(e) = ret {
-        panic!("error: {}", e);
+        eprintln!("error: {:#?}", e.cause());
+        return Err(e.into());
     }
+
     if let Err(e) = child.join() {
-        Err(io::Error::new(
-            io::ErrorKind::ConnectionRefused,
-            format!("{:#?}", e),
-        ))
+        Err(failure::err_msg(format!("{:#?}", e)))
     } else {
         Ok(())
     }
