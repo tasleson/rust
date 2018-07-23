@@ -6,13 +6,13 @@ use {ErrorKind, Result};
 //use std::process;
 // FIXME
 use libc;
-use std::{self, env, fs, mem, thread};
 use std::collections::HashMap;
 use std::io::{BufReader, Error, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::{env, fs, mem, thread};
 // FIXME: abstract unix domains sockets still not in std
 // FIXME: https://github.com/rust-lang/rust/issues/14194
 use unix_socket::UnixListener as AbstractUnixListener;
@@ -528,6 +528,7 @@ pub fn listen_multiplex<S: ?Sized + AsRef<str>, H: ::ConnectionHandler + Send + 
 ) -> Result<()> {
     let handler = Arc::new(handler);
     let mut fd_to_stream: HashMap<i32, Stream> = HashMap::new();
+    let mut fd_to_buffer: HashMap<i32, Vec<u8>> = HashMap::new();
     let mut fds = Vec::new();
 
     let listener = Listener::new(address)?;
@@ -535,23 +536,14 @@ pub fn listen_multiplex<S: ?Sized + AsRef<str>, H: ::ConnectionHandler + Send + 
 
     fds.push(libc::pollfd {
         fd: listener.as_raw_fd(),
-        revents:0,
+        revents: 0,
         events: libc::POLLIN,
     });
 
     loop {
         // Read activity on listening socket
         if fds[0].revents != 0 {
-            let mut client = match listener.accept(accept_timeout) {
-                Err(e) => {
-                    if e.kind() == ErrorKind::Timeout {
-                        continue;
-                    } else {
-                        return Err(e);
-                    }
-                }
-                Ok(s) => s,
-            };
+            let mut client = listener.accept(0)?;
 
             client.set_nonblocking(true)?;
 
@@ -563,53 +555,72 @@ pub fn listen_multiplex<S: ?Sized + AsRef<str>, H: ::ConnectionHandler + Send + 
             });
 
             fd_to_stream.insert(fd, client);
+            fd_to_buffer.insert(fd, Vec::new());
         }
 
         // Store which indices to remove
-        let mut indices_to_remove = vec!();
+        let mut indices_to_remove = vec![];
 
         // Check client connections ...
         for i in 1..fds.len() {
             if fds[i].revents != 0 {
-
                 // It appears we are unable to leave the stream in the hashmap and have it
                 // mutable for the call into handle, thus we remove and re-insert if we need too.
                 // Perhaps there is a better way to handle this.
                 let mut client = fd_to_stream.remove(&fds[i].fd).unwrap();
-                let mut reader = BufReader::new(client.try_clone().expect("Could not split stream"));
 
-                match handler.handle(&mut reader, &mut client) {
-                    Ok(_) => {
-                        // When we get an Ok result the socket went EOF, lets shut it down.
-                        let _ = client.shutdown();
-                        indices_to_remove.push(i);
-                    },
-                    Err(e) => {
-                        match e.kind() {
-                            ErrorKind::ConnectionClosed => {
-                                let _ = client.shutdown();
-                                indices_to_remove.push(i);
-                            },
-                            ErrorKind::Io(n) => {
-                                if n == std::io::ErrorKind::WouldBlock {
-                                    // Hmmmm, this is our indication that we can continue, stuff
-                                    // the stream and associated fd back into mapping.
-                                    fd_to_stream.insert(fds[i].fd, client);
-                                } else {
-                                    // Other IO errors, we will shut down.
-                                    let _ = client.shutdown();
-                                    indices_to_remove.push(i);
+                let mut buf = fd_to_buffer.get_mut(&fds[i].fd).unwrap();
+                loop {
+                    let mut msg_index: Option<usize> = None;
+                    let mut byte_buf: [u8; 8192] = [0; 8192];
+                    match client.read(&mut byte_buf) {
+                        Ok(0) => {
+                            let _ = client.shutdown();
+                            indices_to_remove.push(i);
+                            break;
+                        }
+                        Ok(len) => {
+                            let old: usize = buf.len();
+                            buf.extend(&byte_buf[0..len]);
+
+                            for (n, b) in byte_buf[0..len].iter().enumerate() {
+                                if *b == 0u8 {
+                                    msg_index = Some(old + n + 1);
+                                    break;
                                 }
                             }
-                            err => {
-                                eprintln!("handler error: {}", err);
-                                for cause in err.causes().skip(1) {
-                                    eprintln!("  caused by: {}", cause);
+
+                            if let Some(n) = msg_index {
+                                match handler.handle(&mut BufReader::new(&buf[0..n]), &mut client) {
+                                    Ok(_) => {}
+                                    Err(e) => match e.kind() {
+                                        err => {
+                                            eprintln!("handler error: {}", err);
+                                            for cause in err.causes().skip(1) {
+                                                eprintln!("  caused by: {}", cause);
+                                            }
+                                            let _ = client.shutdown();
+                                            indices_to_remove.push(i);
+                                            break;
+                                        }
+                                    },
                                 }
-                                let _ = client.shutdown();
-                                indices_to_remove.push(i);
+
+                                buf.drain(0..n);
                             }
                         }
+                        Err(e) => match e.kind() {
+                            ::std::io::ErrorKind::WouldBlock => {
+                                fd_to_stream.insert(fds[i].fd, client);
+                                break;
+                            }
+                            _ => {
+                                let _ = client.shutdown();
+                                indices_to_remove.push(i);
+                                eprintln!("IO error: {}", e);
+                                break;
+                            }
+                        },
                     }
                 }
             }
@@ -617,13 +628,24 @@ pub fn listen_multiplex<S: ?Sized + AsRef<str>, H: ::ConnectionHandler + Send + 
 
         // We can't modify the vector while we are traversing it, so update now.
         for i in indices_to_remove {
+            fd_to_buffer.remove(&fds[i].fd);
             fds.remove(i);
         }
 
-        let r = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::c_ulong, -1) };
+        let r = unsafe {
+            libc::poll(
+                fds.as_mut_ptr(),
+                fds.len() as libc::c_ulong,
+                (accept_timeout * 1000) as i32,
+            )
+        };
 
         if r < 0 {
             return Err(Error::last_os_error().into());
+        }
+
+        if r == 0 {
+            return Err(ErrorKind::Timeout.into());
         }
     }
 }
