@@ -372,9 +372,16 @@ where
     if let Some(shuffle_seed) = shuffle_seed {
         shuffle_tests(shuffle_seed, &mut remaining);
     }
+
+    // Separate exclusive tests from regular tests
+    // Exclusive tests must run one at a time, while regular tests can run in parallel
+    let (exclusive_tests, regular_tests): (Vec<_>, Vec<_>) =
+        remaining.into_iter().partition(|(_, test)| test.desc.exclusive);
+
     // Store the tests in a VecDeque so we can efficiently remove the first element to run the
     // tests in the order they were passed (unless shuffled).
-    let mut remaining = VecDeque::from(remaining);
+    let mut exclusive_tests = VecDeque::from(exclusive_tests);
+    let mut remaining = VecDeque::from(regular_tests);
     let mut pending = 0;
 
     let (tx, rx) = channel::<CompletedTest>();
@@ -386,6 +393,29 @@ where
 
     let mut running_tests: TestMap = HashMap::default();
     let mut timeout_queue: VecDeque<TimeoutEntry> = VecDeque::new();
+
+    // Run exclusive tests first, always serially (one at a time)
+    while !exclusive_tests.is_empty() {
+        let (id, test) = exclusive_tests.pop_front().unwrap();
+        let event = TestEvent::TeWait(test.desc.clone());
+        notify_about_test_event(event)?;
+        let join_handle = run_test(opts, !opts.run_tests, id, test, run_strategy, tx.clone());
+        // Wait for the test to complete.
+        let mut completed_test = rx.recv().unwrap();
+        RunningTest { join_handle }.join(&mut completed_test);
+
+        let fail_fast = match completed_test.result {
+            TrIgnored | TrOk | TrBench(_) => false,
+            TrFailed | TrFailedMsg(_) | TrTimedFail => opts.fail_fast,
+        };
+
+        let event = TestEvent::TeResult(completed_test);
+        notify_about_test_event(event)?;
+
+        if fail_fast {
+            return Ok(());
+        }
+    }
 
     fn get_timed_out_tests(
         running_tests: &TestMap,

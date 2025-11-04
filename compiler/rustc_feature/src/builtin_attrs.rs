@@ -456,6 +456,15 @@ pub static BUILTIN_ATTRIBUTES: &[BuiltinAttribute] = &[
         ),
         FutureWarnFollowing, EncodeCrossCrate::No,
     ),
+    gated!(
+        exclusive, Normal,
+        template!(
+            Word,
+            "https://doc.rust-lang.org/reference/attributes/testing.html#the-exclusive-attribute"
+        ),
+        WarnFollowing, EncodeCrossCrate::No, exclusive_tests,
+        "the `#[exclusive]` attribute is an experimental feature",
+    ),
     // FIXME(Centril): This can be used on stable but shouldn't.
     ungated!(
         reexport_test_harness_main, CrateLevel, template!(NameValueStr: "name"), ErrorFollowing,

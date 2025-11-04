@@ -229,6 +229,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                     | AttributeKind::Dummy
                     | AttributeKind::RustcBuiltinMacro { .. }
                     | AttributeKind::Ignore { .. }
+                    | AttributeKind::Exclusive { .. }
                     | AttributeKind::Path(..)
                     | AttributeKind::NoImplicitPrelude(..)
                     | AttributeKind::AutomaticallyDerived(..)

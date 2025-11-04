@@ -1077,6 +1077,7 @@ fn generate_test_desc_and_fn(
                 Ignore::Some(ref ignores) => ignores.iter().any(|s| target_str.contains(s)),
             },
             ignore_message: None,
+            exclusive: false,
             source_file: "",
             start_line: 0,
             start_col: 0,
