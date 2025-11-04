@@ -549,6 +549,9 @@ pub enum AttributeKind {
         reason: Option<Symbol>,
     },
 
+    /// Represents `#[exclusive]`
+    Exclusive { span: Span },
+
     /// Represents `#[inline]` and `#[rustc_force_inline]`.
     Inline(InlineAttr, Span),
 

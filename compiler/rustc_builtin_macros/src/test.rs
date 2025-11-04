@@ -318,6 +318,8 @@ pub(crate) fn expand_test_or_bench(
                                         cx.expr_none(sp)
                                     },
                                 ),
+                                // exclusive: true | false
+                                field("exclusive", cx.expr_bool(sp, should_exclusive(&item)),),
                                 // source_file: <relative_path_of_source_file>
                                 field("source_file", cx.expr_str(sp, location_info.0)),
                                 // start_line: start line of the test fn identifier.
@@ -489,6 +491,10 @@ fn should_panic(cx: &ExtCtxt<'_>, i: &ast::Item) -> ShouldPanic {
     } else {
         ShouldPanic::No
     }
+}
+
+fn should_exclusive(i: &ast::Item) -> bool {
+    attr::contains_name(&i.attrs, sym::exclusive)
 }
 
 enum TestType {

@@ -45,6 +45,7 @@ impl AttributeKind {
             Dummy => No,
             ExportName { .. } => Yes,
             ExportStable => No,
+            Exclusive { .. } => No,
             FfiConst(..) => No,
             FfiPure(..) => No,
             Fundamental { .. } => Yes,

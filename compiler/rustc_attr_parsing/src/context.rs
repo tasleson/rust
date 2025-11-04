@@ -61,7 +61,7 @@ use crate::attributes::semantics::MayDangleParser;
 use crate::attributes::stability::{
     BodyStabilityParser, ConstStabilityIndirectParser, ConstStabilityParser, StabilityParser,
 };
-use crate::attributes::test_attrs::{IgnoreParser, ShouldPanicParser};
+use crate::attributes::test_attrs::{ExclusiveParser, IgnoreParser, ShouldPanicParser};
 use crate::attributes::traits::{
     AllowIncoherentImplParser, CoinductiveParser, ConstTraitParser, DenyExplicitImplParser,
     DoNotImplementViaObjectParser, FundamentalParser, MarkerParser, ParenSugarParser,
@@ -182,6 +182,7 @@ attribute_parsers!(
         Single<DeprecationParser>,
         Single<DummyParser>,
         Single<ExportNameParser>,
+        Single<ExclusiveParser>,
         Single<IgnoreParser>,
         Single<InlineParser>,
         Single<LinkNameParser>,

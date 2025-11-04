@@ -469,6 +469,8 @@ declare_features! (
     (unstable, custom_inner_attributes, "1.30.0", Some(54726)),
     /// Allows custom test frameworks with `#![test_runner]` and `#[test_case]`.
     (unstable, custom_test_frameworks, "1.30.0", Some(50297)),
+    /// Allows the `#[exclusive]` attribute on test functions to run them serially.
+    (unstable, exclusive_tests, "1.93.0", None),
     /// Allows declarative macros 2.0 (`macro`).
     (unstable, decl_macro, "1.17.0", Some(39412)),
     /// Allows the use of default values on struct definitions and the construction of struct

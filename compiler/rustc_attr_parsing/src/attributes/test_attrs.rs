@@ -96,3 +96,29 @@ impl<S: Stage> SingleAttributeParser<S> for ShouldPanicParser {
         })
     }
 }
+
+pub(crate) struct ExclusiveParser;
+
+impl<S: Stage> SingleAttributeParser<S> for ExclusiveParser {
+    const PATH: &[Symbol] = &[sym::exclusive];
+    const ATTRIBUTE_ORDER: AttributeOrder = AttributeOrder::KeepOutermost;
+    const ON_DUPLICATE: OnDuplicate<S> = OnDuplicate::Warn;
+    const ALLOWED_TARGETS: AllowedTargets =
+        AllowedTargets::AllowListWarnRest(&[Allow(Target::Fn), Error(Target::WherePredicate)]);
+    const TEMPLATE: AttributeTemplate = template!(
+        Word,
+        "https://doc.rust-lang.org/reference/attributes/testing.html#the-exclusive-attribute"
+    );
+
+    fn convert(cx: &mut AcceptContext<'_, '_, S>, args: &ArgParser<'_>) -> Option<AttributeKind> {
+        match args {
+            ArgParser::NoArgs => Some(AttributeKind::Exclusive { span: cx.attr_span }),
+            _ => {
+                let suggestions = cx.suggestions();
+                let span = cx.attr_span;
+                cx.emit_lint(AttributeLintKind::IllFormedAttributeInput { suggestions }, span);
+                None
+            }
+        }
+    }
+}
